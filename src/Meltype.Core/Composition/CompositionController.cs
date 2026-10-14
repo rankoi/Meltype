@@ -2376,7 +2376,9 @@ public sealed class CompositionController
         if (formatEnglish && !preserveText) text = EnglishPhraseSpacing.Format(text);
         var corrected = CorrectPreviousCommit(raw, english);
         if (!preserveText && _options.SpaceAroundEnglish()) text = AddSpacesAroundEnglish(text, corrected ?? _precedingText, _followingText);
-        text = _options.WidthSettings().ApplySymbolWidths(text);
+        // 幅設定は自動で確定するときにだけ適用する。候補を選び直した結果や
+        // 原文を保持する確定はユーザーの明示的な選択なので、設定で上書きしない。
+        if (!chosen && !preserveText) text = _options.WidthSettings().ApplySymbolWidths(text);
         // 英語とも日本語とも読める語を、文脈を決めずに (選び直さずに) 確定したときだけ、後で確定し直せるようにしておく。
         if (!chosen && _detector.IsAmbiguousWord(raw))
         {
