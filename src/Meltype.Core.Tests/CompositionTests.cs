@@ -625,8 +625,8 @@ internal static class CompositionTests
         Assert.Equal("１２３", k.Host.Document, "未選択候補を表示どおりに確定する");
 
         k = new Keyboard { SymbolWidths = new Meltype.Config.Settings { FullWidthDigits = true } };
-        k.Type("abc123\n");
-        Assert.Equal("abc123", k.Host.Document, "英語区間の数字は変換しない");
+        k.Type("hello123\n");
+        Assert.Equal("hello123", k.Host.Document, "英語区間の数字は変換しない");
     }
 
     [Test]

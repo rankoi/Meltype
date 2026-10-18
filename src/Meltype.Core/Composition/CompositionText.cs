@@ -972,7 +972,10 @@ public sealed class CompositionText
                 pending = "";
             }
             var japanese = convert is not null && kana.Length > 0 ? convert(kana) : kana;
-            builder.Append(transformJapanese?.Invoke(japanese) ?? japanese);
+            // 英語と日本語の境目にある数字・記号は英語の一部として扱う (hello123, C++)。
+            var touchesEnglish = i > 0 && segments[i - 1].IsEnglish || i + 1 < segments.Count && segments[i + 1].IsEnglish;
+            var latinSymbolRun = segment.Raw.Any(char.IsAsciiLetter) && !kana.Any(c => c is >= 'ぁ' and <= 'ゖ' or >= 'ァ' and <= 'ヺ');
+            builder.Append(touchesEnglish || latinSymbolRun ? segment.Raw : transformJapanese?.Invoke(japanese) ?? japanese);
             builder.Append(pending);
         }
         return builder.ToString();

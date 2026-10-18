@@ -2413,15 +2413,27 @@ public sealed class CompositionController
     /// <summary>今の表示 (ライブ変換が有効なら日本語区間は漢字に変換済み)。</summary>
     private string CurrentDisplay(bool final) =>
         _text.Display(final, _options.LiveConversion() ? LiveConvert : null,
-            _options.WidthSettings().ApplySymbolWidths);
+            ApplySymbolWidthsToJapanese);
+
+    /// <summary>ASCII 英字を含む出力は英語・コードの一部として扱い、数字や記号だけを全角化しない。</summary>
+    private string ApplySymbolWidthsToJapanese(string text) => text.Any(char.IsAsciiLetter) ||
+        _text.Raw.Any(char.IsAsciiLetter) && !text.Any(c => c is >= 'ぁ' and <= 'ゖ' or >= 'ァ' and <= 'ヺ')
+        ? text
+        : _options.WidthSettings().ApplySymbolWidths(text);
 
     /// <summary>候補が自動のままの日本語文節と数字だけの文節に幅設定を反映する。明示選択と英語文節はそのまま。</summary>
     private string DisplayClauseText(Clause clause)
     {
         var numeric = clause.Text.Length > 0 && clause.Text.All(c => c is >= '0' and <= '9' or >= '０' and <= '９');
-        return clause.Changed || clause.IsEnglish && !numeric || _text.Mode != DisplayMode.Auto
+        var index = _clauses.IndexOf(clause);
+        var touchesEnglish = index > 0 && _clauses[index - 1].IsEnglish || index >= 0 && index + 1 < _clauses.Count && _clauses[index + 1].IsEnglish;
+        var latinSymbolRun = clause.Raw?.Any(char.IsAsciiLetter) == true && !clause.Text.Any(c => c is >= 'ぁ' and <= 'ゖ' or >= 'ァ' and <= 'ヺ');
+        var learnedChoice = _options.History?.Get(clause.Reading) == clause.Text;
+        return clause.Changed || learnedChoice || clause.IsEnglish && !numeric || _text.Mode != DisplayMode.Auto
             ? clause.Text
-            : _options.WidthSettings().ApplySymbolWidths(clause.Text);
+            : touchesEnglish || latinSymbolRun
+                ? clause.Raw ?? clause.Text
+            : ApplySymbolWidthsToJapanese(clause.Text);
     }
 
     // ---- 確定 ----
@@ -2697,7 +2709,7 @@ public sealed class CompositionController
         if (_options.History is not { } history) return;
         // 1 文字の読み (き → 記) を覚えると、関係ない変換 (き + ごうとう) まで巻き込むので 2 文字以上だけ。
         // ただし数字・記号の 1 文字 (1 → ①、( → （) は、かなの途中に巻き込まれないので覚える (issue #672)。
-        foreach (var clause in _clauses.Where(c => !c.IsEnglish && c.Changed && (c.Reading.Length >= 2 || c.Reading.Length == 1 && c.Reading[0] is < 'ぁ' or > 'ヿ' && !char.IsAsciiLetter(c.Reading[0]))))
+        foreach (var clause in _clauses.Where(c => (!c.IsEnglish || IsNumericReading(c.Reading)) && c.Changed && (c.Reading.Length >= 2 || c.Reading.Length == 1 && c.Reading[0] is < 'ぁ' or > 'ヿ' && !char.IsAsciiLetter(c.Reading[0]))))
         {
             // かな・カタカナのまま確定したのは、その場限りのことが多いので覚えない。
             // 打ったままの英字を選んだのは、上で英語として覚えた。
@@ -2708,6 +2720,8 @@ public sealed class CompositionController
             history.Remember(clause.Reading, clause.Text);
         }
     }
+
+    private static bool IsNumericReading(string reading) => reading.Length > 0 && reading.All(c => c is >= '0' and <= '9' or >= '０' and <= '９');
 
     /// <summary>
     /// 変換エンジン (Mozc) にも、確定した文節を覚えさせる。英語の文節・打ったままの英字で区切った、日本語の文節のまとまりごとに。
