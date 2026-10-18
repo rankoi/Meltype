@@ -974,10 +974,10 @@ public sealed class CompositionText
             var japanese = convert is not null && kana.Length > 0 ? convert(kana) : kana;
             // 英語と日本語の境目にある数字・記号は英語の一部として扱う (hello123, C++)。
             var touchesEnglish = i > 0 && segments[i - 1].IsEnglish || i + 1 < segments.Count && segments[i + 1].IsEnglish;
-            var hasWidthTarget = segment.Raw.Any(IsSymbolWidthTarget);
+            var allWidthTargets = segment.Raw.Length > 0 && segment.Raw.All(IsSymbolWidthTarget);
             var hasJapaneseText = japanese.Any(c => c > 0x7F && char.IsLetter(c));
-            var latinSymbolRun = segment.Raw.Any(char.IsAsciiLetter) && hasWidthTarget && !hasJapaneseText;
-            builder.Append((touchesEnglish && hasWidthTarget || latinSymbolRun) && !hasJapaneseText
+            var latinSymbolRun = segment.Raw.Any(char.IsAsciiLetter) && segment.Raw.Any(IsWidthSymbol) && !hasJapaneseText;
+            builder.Append((touchesEnglish && allWidthTargets || latinSymbolRun) && !hasJapaneseText
                 ? segment.Raw
                 : transformJapanese?.Invoke(japanese) ?? japanese);
             builder.Append(pending);
@@ -988,6 +988,8 @@ public sealed class CompositionText
     private static bool IsSymbolWidthTarget(char c) => c is >= '0' and <= '9' or >= '０' and <= '９' or
         '!' or '！' or '?' or '？' or '\\' or '¥' or '￥' or '$' or '＄' or '%' or '％' or '^' or '＾' or
         '&' or '＆' or '=' or '＝' or '+' or '＋' or '*' or '＊';
+
+    private static bool IsWidthSymbol(char c) => IsSymbolWidthTarget(c) && c is not (>= '0' and <= '9' or >= '０' and <= '９');
 
     /// <summary>英語判定を無視してすべてかなにしたもの (F6)。</summary>
     public string AllKana(bool final) => string.Concat(_units.Select(u => u.Kana)) + PendingText(final);
