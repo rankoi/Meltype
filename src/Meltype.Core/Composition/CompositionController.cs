@@ -2427,14 +2427,20 @@ public sealed class CompositionController
         var numeric = clause.Text.Length > 0 && clause.Text.All(c => c is >= '0' and <= '9' or >= '０' and <= '９');
         var index = _clauses.IndexOf(clause);
         var touchesEnglish = index > 0 && _clauses[index - 1].IsEnglish || index >= 0 && index + 1 < _clauses.Count && _clauses[index + 1].IsEnglish;
-        var latinSymbolRun = clause.Raw?.Any(char.IsAsciiLetter) == true && !clause.Text.Any(c => c is >= 'ぁ' and <= 'ゖ' or >= 'ァ' and <= 'ヺ');
+        var hasJapaneseText = clause.Text.Any(c => c > 0x7F && char.IsLetter(c));
+        var hasWidthTarget = (clause.Raw ?? clause.Text).Any(IsSymbolWidthTarget);
+        var latinSymbolRun = clause.Raw?.Any(char.IsAsciiLetter) == true && hasWidthTarget && !hasJapaneseText;
         var learnedChoice = _options.History?.Get(clause.Reading) == clause.Text;
         return clause.Changed || learnedChoice || clause.IsEnglish && !numeric || _text.Mode != DisplayMode.Auto
             ? clause.Text
-            : touchesEnglish || latinSymbolRun
+            : (touchesEnglish && hasWidthTarget || latinSymbolRun) && !hasJapaneseText
                 ? clause.Raw ?? clause.Text
             : ApplySymbolWidthsToJapanese(clause.Text);
     }
+
+    private static bool IsSymbolWidthTarget(char c) => c is >= '0' and <= '9' or >= '０' and <= '９' or
+        '!' or '！' or '?' or '？' or '\\' or '¥' or '￥' or '$' or '＄' or '%' or '％' or '^' or '＾' or
+        '&' or '＆' or '=' or '＝' or '+' or '＋' or '*' or '＊';
 
     // ---- 確定 ----
 

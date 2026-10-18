@@ -974,12 +974,20 @@ public sealed class CompositionText
             var japanese = convert is not null && kana.Length > 0 ? convert(kana) : kana;
             // 英語と日本語の境目にある数字・記号は英語の一部として扱う (hello123, C++)。
             var touchesEnglish = i > 0 && segments[i - 1].IsEnglish || i + 1 < segments.Count && segments[i + 1].IsEnglish;
-            var latinSymbolRun = segment.Raw.Any(char.IsAsciiLetter) && !kana.Any(c => c is >= 'ぁ' and <= 'ゖ' or >= 'ァ' and <= 'ヺ');
-            builder.Append(touchesEnglish || latinSymbolRun ? segment.Raw : transformJapanese?.Invoke(japanese) ?? japanese);
+            var hasWidthTarget = segment.Raw.Any(IsSymbolWidthTarget);
+            var hasJapaneseText = japanese.Any(c => c > 0x7F && char.IsLetter(c));
+            var latinSymbolRun = segment.Raw.Any(char.IsAsciiLetter) && hasWidthTarget && !hasJapaneseText;
+            builder.Append((touchesEnglish && hasWidthTarget || latinSymbolRun) && !hasJapaneseText
+                ? segment.Raw
+                : transformJapanese?.Invoke(japanese) ?? japanese);
             builder.Append(pending);
         }
         return builder.ToString();
     }
+
+    private static bool IsSymbolWidthTarget(char c) => c is >= '0' and <= '9' or >= '０' and <= '９' or
+        '!' or '！' or '?' or '？' or '\\' or '¥' or '￥' or '$' or '＄' or '%' or '％' or '^' or '＾' or
+        '&' or '＆' or '=' or '＝' or '+' or '＋' or '*' or '＊';
 
     /// <summary>英語判定を無視してすべてかなにしたもの (F6)。</summary>
     public string AllKana(bool final) => string.Concat(_units.Select(u => u.Kana)) + PendingText(final);
