@@ -151,6 +151,7 @@ private:
     bool serverActive_ = false;
     bool directDetection_ = false; // 英数状態でもローマ字検知が有効 (Meltype.exe の応答)
     bool directEnglishWord_ = false;
+    bool fullWidthSpaceByDefault_ = false; // 通常 Space を Meltype.exe に渡す必要があるか
     ULONGLONG lastHello_ = 0;
     bool open_ = true;
     bool codeApp_ = false;         // コードエディター・ターミナル (Meltype.exe の応答の code)
@@ -197,6 +198,8 @@ private:
     Microsoft::WRL::ComPtr<ITfContext> secretContext_;
     ULONGLONG secretTime_ = 0;
     int secretResult_ = -1;
+    bool secretPrivate_ = false;
+    bool privateField_ = false;    // 前に入力欄の種類を読んだとき、入力を覚えないように求める入力欄 (IS_PRIVATE) だった
     const wchar_t* scopeSource_ = nullptr;  // 入力欄の種類を前に読んだところ (ログ用)
     bool keepAppCaret_ = false;    // 確定したあと、キャレットを動かさない (クリック・別の入力欄で確定したとき)
     bool deactivated_ = false;     // 終わった後は Meltype.exe とやり取りしない

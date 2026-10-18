@@ -49,7 +49,6 @@ constexpr GUID kPropInputScope = {0x1713dd5a, 0x68e7, 0x4a5b, {0x9a, 0xf6, 0x59,
 bool IsSecretScope(InputScope scope) {
     switch (scope) {
         case IS_PASSWORD: case IS_NUMERIC_PASSWORD: case IS_NUMERIC_PIN: case IS_ALPHANUMERIC_PIN: case IS_ALPHANUMERIC_PIN_SET:
-        case IS_PRIVATE:
             return true;
         default:
             return false;
@@ -440,6 +439,8 @@ bool TextService::IsSecretField(TfEditCookie ec, ITfContext* context) {
     // 種類の値はあるのに中身を読めないときは、パスワード欄かもしれないので、パスワード欄として扱う (打った文字を Meltype.exe に送らない)。
     // 問い合わせ自体ができないとき (対応していないアプリ・選択が無い) は、種類を決めていない入力欄と同じにする
     // (止めると、そのアプリでは Meltype IME がまったく使えなくなるため)
+    // 入力を覚えないように求める入力欄 (IS_PRIVATE。ブラウザーのシークレット / InPrivate ウィンドウ) かも、ここで読んで privateField_ に残す
+    privateField_ = false;
     auto unreadable = [](const wchar_t* step) {
         TipLog(L"入力欄の種類を読めないので、パスワード欄として扱います (%s)", step);
         return true;
@@ -475,6 +476,7 @@ bool TextService::IsSecretField(TfEditCookie ec, ITfContext* context) {
             } else {
                 for (UINT i = 0; i < count; i++) {
                     if (IsSecretScope(scopes[i])) secret = true;
+                    if (scopes[i] == IS_PRIVATE) privateField_ = true;
                 }
             }
             if (scopes != nullptr) CoTaskMemFree(scopes);
@@ -637,6 +639,7 @@ void TextService::Hello() {
     JsonValue reply;
     serverActive_ = Request("{\"op\":\"hello\",\"process\":" + JsonString(ProcessName()) + "}", reply) && reply[L"active"].Bool();
     directDetection_ = serverActive_ && reply[L"directDetection"].Bool();
+    fullWidthSpaceByDefault_ = serverActive_ && reply[L"fullWidthSpaceByDefault"].Bool();
     directEnglishWord_ = false;
     // コードエディター・ターミナルのアプリなら、キャレットが動くたびに入力モードの表示を合わせる (QueryMode)
     codeApp_ = serverActive_ && reply[L"code"].Bool();
@@ -724,9 +727,9 @@ bool TextService::WouldEat(ITfContext* context, UINT vk, LPARAM lParam, wchar_t&
         if (continuesWord) return pass(L"英語の単語の続き");
         directEnglishWord_ = false;
     }
-    // 日本語入力中の Space は、幅設定を確認するために Meltype.exe に渡す。OFF の通常 Space は C# 側でそのまま通す。
+    // Shift+Space は幅設定を確認する。通常 Space は全角 Space 設定が ON のときだけ Meltype.exe に渡す。
     bool starts = (ch >= L'a' && ch <= L'z') || (ch >= L'A' && ch <= L'Z') || (ch >= L'!' && ch <= L'~') ||
-                  (vk == VK_SPACE && (KeyDown(VK_SHIFT) || open_));
+                  (vk == VK_SPACE && (KeyDown(VK_SHIFT) || (open_ && fullWidthSpaceByDefault_)));
     if (!starts) return false;
     if (!ServerReady()) return pass(L"Meltype.exe が使えない");
     // パスワード欄か。OnTestKeyDown で読んだ結果は、続く同じキー・同じ入力欄の OnKeyDown で 1 回だけ使う (ほかのキー・入力欄には使わない)
@@ -734,6 +737,7 @@ bool TextService::WouldEat(ITfContext* context, UINT vk, LPARAM lParam, wchar_t&
     int secret;
     if (!test && vk == secretVk_ && context == secretContext_.Get() && now - secretTime_ < 200) {
         secret = secretResult_;
+        privateField_ = secretPrivate_;
     } else {
         secret = ReadSecretField(context);
     }
@@ -743,6 +747,7 @@ bool TextService::WouldEat(ITfContext* context, UINT vk, LPARAM lParam, wchar_t&
         secretContext_ = context;
         secretTime_ = now;
         secretResult_ = secret;
+        secretPrivate_ = privateField_;
     }
     if (secret == 1) return pass(L"パスワードの入力欄");
     // 読めなかったら、キーの編集セッションの中で確かめる (HandleKey)
@@ -861,6 +866,8 @@ void TextService::HandleKey(ITfContext* context, UINT vk, wchar_t ch) {
                               std::string(",\"direct\":") + (!open_ ? "true" : "false");
         // 前に確定してからキャレットが動いた: Meltype.exe に、前の語を確定し直さないように伝える
         if (caretMoved_) request += ",\"moved\":true";
+        // 入力を覚えないように求める入力欄: Meltype.exe に学習しないように伝える
+        if (privateField_) request += ",\"private\":true";
         request += PendingPassed();
         caretMoved_ = false;
         if (composition_ == nullptr) {
@@ -1006,6 +1013,7 @@ std::string TextService::PendingPassed() {
 
 void TextService::ApplyMode(const JsonValue& reply) {
     bool active = reply[L"active"].Bool();
+    fullWidthSpaceByDefault_ = active && reply[L"fullWidthSpaceByDefault"].Bool();
     codeApp_ = active && reply[L"code"].Bool();
     bool english = codeApp_ && reply[L"english"].Bool();
     if (english == codeEnglish_) return;
@@ -1538,11 +1546,18 @@ void TextService::ShowCandidates(TfEditCookie ec, ITfContext* context, const Jso
     data.selected = view[L"selectedIndex"].Int();
     data.suggestion = view[L"suggestion"].Str();
     data.meaning = view[L"meaning"].Str();
+    // 打ったキー: 見えている文字と同じ (英字のまま) なら出さない
+    if (view[L"typed"].Str() != view[L"text"].Str()) data.typed = view[L"typed"].Str();
     bool converting = view[L"converting"].Bool();
     const auto& predictions = view[L"predictions"].array;
-    if (!((converting && data.candidates.size() > 1) || !data.suggestion.empty() || (!converting && !predictions.empty()))) {
+    if (!((converting && data.candidates.size() > 1) || !data.suggestion.empty() || (!converting && !predictions.empty()) || !data.typed.empty())) {
         candidates_->Hide();
         return;
+    }
+    // 打ったキーだけを出すときは、候補が 1 つでも一覧にしない
+    if (converting && data.candidates.size() <= 1) {
+        data.candidates.clear();
+        data.meaning.clear();
     }
     if (!converting) {
         // 変換していないときは、予測変換の候補を出す (Tab で選ぶ。無ければ「もしかして」だけ)
